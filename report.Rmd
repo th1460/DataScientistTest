@@ -442,6 +442,10 @@ Algumas limitações de ajuste do modelo foram que apesar de se ter muito dado n
 
 Foi desenvolvida uma aplicação *Web*  no pacote `shiny` a fim de analisar todos os clientes como foi realizado para um aqui. Esta aplicação vai rodar no Shiny Server em um servidor Linux na nuvem (utilizando serviços da Google Cloud Platform). O código desenvolvido da aplicação está no arquivo `dashboard.Rmd`.
 
+A aplicação está rondando no link: <http://35.229.22.117:3838/DataScientistTest/>
+
 ## API
 
 Foi utilizado o pacote `plumber` a fim conceder acesso aos dados projetados através de uma API. A API também vai rodar no mesmo servidor da aplicação *Web*.
+
+A API poderá ser consumida pelo link: <http://35.229.22.117:7852/predict?cliente=215/> (no exemplo estou utilizando o cliente 215)
