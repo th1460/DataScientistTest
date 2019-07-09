@@ -446,6 +446,10 @@ A aplicação está rondando no link: <http://35.229.22.117:3838/DataScientistTe
 
 ## API
 
-Foi utilizado o pacote `plumber` a fim conceder acesso aos dados projetados através de uma API. A API também vai rodar no mesmo servidor da aplicação *Web*.
+Foi utilizado o pacote `plumber` a fim conceder acesso a projeção do dia 28 de Fevereiro através de uma API. A API também vai rodar no mesmo servidor da aplicação *Web*.
 
-A API poderá ser consumida pelo link: <http://35.229.22.117:7852/predict?cliente=215/> (no exemplo estou utilizando o cliente 215)
+A API poderá ser consumida pelo link: <http://35.229.22.117:7852/predict?cliente=215> (no exemplo estou utilizando o cliente 215)
+
+A inicialização da API no terminal se da pela execução do código:
+
+`R -e 'plumber::plumb("plumber.R")$run(host = "0.0.0.0", port = 7852)'`
