@@ -1,0 +1,462 @@
+---
+title: "Service Level Agreement"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+
+require(flexdashboard)
+require(dplyr)
+require(magrittr)
+require(readr)
+require(DBI)
+require(dbplyr)
+require(lubridate)
+require(ggplot2)
+require(DT)
+require(plotly)
+require(glue)
+require(leaflet)
+require(lme4)
+
+```
+
+```{r}
+
+# criando canal com DB
+
+canal <- dbConnect(RSQLite::SQLite(), dbname = "DB.sqlite")
+
+```
+
+
+sidebar {.sidebar}
+=======================================================================
+
+Dashboard com algumas análises descritivas de cada empresa, o ajuste do modelo e a projeção para o dia 28 de fevereiro de 2019
+
+```{r}
+
+selectInput("cliente", h3("Cliente"), choices = tbl(canal, "dataset_a") %>% distinct(customerCode) %>% pull())
+
+```
+
+
+Descritivas
+=======================================================================
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+
+```{r}
+
+dataInput <- reactive({
+  
+  tbl(canal, "dataset_a") %>% 
+    filter(customerCode == !! input$cliente) %>% 
+    as_tibble()
+  
+})
+
+```
+
+### Distribuição diária do percentual dos chamados efetivamente concluídos
+
+```{r}
+
+renderPlotly({
+  
+  g1 <- 
+    dataInput() %>% 
+    mutate(month = factor(month, labels = c("Janeiro", "Fevereiro"))) %>% 
+    ggplot() +
+    aes(day, n/total * 100) + 
+    geom_line() + 
+    geom_point(aes(text = glue("Dia: {day} <br> %: {(n/total * 100) %>% round(1)}"))) +
+    scale_x_discrete(limits = seq(1, 31, 4)) +
+    facet_grid( ~ month) +
+    labs(x = "Dias") +
+    theme_minimal()
+  ggplotly(g1, tooltip = "text")
+  
+})
+
+```
+
+### Percentual de chamados efetivamente concluídos no tempo acordado, segundo os meses
+
+```{r}
+
+renderPlotly({
+  
+  g2 <- 
+    dataInput() %>% 
+    mutate(month = factor(month, labels = c("Janeiro", "Fevereiro"))) %>% 
+    group_by(month) %>% 
+    summarise(n = sum(n, rm.na = TRUE), 
+              total = sum(total, rm.na = TRUE)) %>% 
+    mutate(taxa = n/total * 100) %>% 
+    ggplot() +
+    aes(as.factor(month), taxa) +
+    geom_col(alpha = .8, aes(text = glue("Mês: {as.factor(month)} <br> %: {taxa %>% round(2)}"))) +
+    labs(x = "Mês", y = "%") +
+    theme_minimal()
+  ggplotly(g2, tooltip = "text")
+  
+})
+
+```
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+
+```{r}
+
+dataInput2 <- reactive({
+  
+  tbl(canal, "dataset") %>% 
+    filter(customerCode == !! input$cliente) %>% 
+    as_tibble()
+  
+})
+
+```
+
+### Medidas sumário da variável averageSolutionTime
+
+```{r}
+
+renderDT({
+  
+  dataInput2() %>% 
+    mutate(month = factor(month, labels = c("Janeiro", "Fevereiro"))) %>% 
+    group_by(month, onTimeSolution) %>% 
+    summarise(`Média` = mean(averageSolutionTime, na.rm = TRUE) %>% round(1), 
+              `Desvio-padrão` = sd(averageSolutionTime, na.rm = TRUE) %>% round(1),
+              `Mediana` = median(averageSolutionTime, na.rm = TRUE),
+              `Intervalo interquartílico` = IQR(averageSolutionTime, na.rm = TRUE)) %>% 
+    na.omit() %>% 
+    rename(`Mês` = month) %>% 
+    mutate(onTimeSolution = onTimeSolution %>% factor(labels = c("Não", "Sim"))) %>% 
+    datatable(rownames = FALSE, options = list(dom = "t"))
+  
+})
+
+```
+
+### Tempo médio diário de solução do problema
+
+```{r}
+
+dataInput3 <- reactive({
+  
+  tbl(canal, "solutiontime") %>% 
+    filter(customerCode == !! input$cliente) %>% 
+    as_tibble()
+  
+})
+
+```
+
+
+```{r}
+
+renderPlotly({
+  
+  g3 <- 
+    dataInput3() %>% 
+    mutate(month = factor(month, levels = c("Janeiro", "Fevereiro"))) %>% 
+    ggplot() +
+    aes(day, mean, 
+        group = onTimeSolution,
+        colour = onTimeSolution,
+        text = glue("Dia: {day} <br> Média: {mean %>% round(1)}")) + 
+    geom_line(alpha = .8) +
+    scale_x_discrete(limits = seq(1, 31, 4)) +
+    facet_grid(~ month) +
+    labs(x = "Dias", y = "Média diária de tempo de solução", colour = "") +
+    theme_minimal()
+  
+  gp3 <- ggplotly(g3, tooltip = "text")
+  gp3[['x']][['layout']][['annotations']][[2]][['x']] <- -0.1
+  gp3 %>% 
+    layout(margin = list(l = 90), hovermode = TRUE)
+  
+})
+
+```
+
+UFs
+=======================================================================
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+
+### Distribuição espacial do percentual de atendimentos fechados no prazo, mês de Janeiro
+
+```{r}
+
+dataInput4 <- 
+  reactive({
+    tbl(canal, "state") %>%
+      filter(customerCode == !! input$cliente, month == "Janeiro") %>% 
+      as_tibble() %>% 
+      mutate(taxa = (n/total * 100) %>% round(1))
+  })
+
+```
+
+
+```{r}
+
+renderLeaflet({
+  
+  npal <- # palheta com as cores que serão plotadas
+    colorNumeric("RdYlBu", 
+                 dataInput4() %>% 
+                   pull(taxa), 
+                 reverse = FALSE)
+  
+  leaflet(data = dataInput4()) %>% # construção do mapa
+    addTiles() %>% 
+    addCircleMarkers(lng = ~LON, lat = ~LAT, 
+                     color = ~npal(taxa), 
+                     label = ~glue("{siteState} ({taxa})")) %>% 
+    addLegend(pal = npal,
+              values = ~taxa,
+              opacity = .8,
+              title = "Janeiro (%)")
+  
+})
+
+```
+
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+
+### Distribuição espacial do percentual de atendimentos fechados no prazo, mês de Fevereiro
+
+```{r}
+
+dataInput5 <- 
+  reactive({
+    tbl(canal, "state") %>%
+      filter(customerCode == !! input$cliente, month == "Fevereiro") %>% 
+      as_tibble() %>% 
+      mutate(taxa = (n/total * 100) %>% round(1))
+  })
+
+```
+
+```{r}
+
+renderLeaflet({
+  
+  npal <- # palheta com as cores que serão plotadas
+    colorNumeric("RdYlBu", 
+                 dataInput5() %>% 
+                   pull(taxa), 
+                 reverse = FALSE)
+  
+  leaflet(data = dataInput5()) %>% # construção do mapa
+    addTiles() %>% 
+    addCircleMarkers(lng = ~LON, lat = ~LAT, 
+                     color = ~npal(taxa), 
+                     label = ~glue("{siteState} ({taxa})")) %>% 
+    addLegend(pal = npal,
+              values = ~taxa,
+              opacity = .8,
+              title = "Fevereiro (%)")
+  
+})
+
+```
+
+Modelo
+=======================================================================
+
+Column
+-----------------------------------------------------------------------
+
+```{r}
+
+# separação dos dados de treino e de teste
+
+# dados de treino do mês de janeiro
+
+data_train1 <- reactive({
+  
+  dataInput() %>% 
+    filter(month == 1)
+  
+})
+
+# dados do mês de fevereiro
+
+data2 <- reactive({
+  
+  dataInput() %>% 
+    filter(month == 2)
+  
+})
+
+# seleção dos 80% do mês de fevereiro para treino
+
+data_train2 <- reactive({
+  
+  data2() %>% 
+    slice(1:round(data2() %>% count() %>% pull() * .8, 0))
+  
+})
+
+# dados de teste (20%)
+
+data_test <- reactive({
+  
+  data2() %>% anti_join(data_train2(), by = "day")
+  
+})
+
+
+erro <- reactive({
+  
+  # ajuste do modelo
+  
+  fit <- 
+    data_train1() %>% 
+    bind_rows(data_train2()) %>%
+    group_by(month) %>% 
+    mutate(cumN = cumsum(n),
+           cumTotal = cumsum(total)) %>%
+    
+    # modelo multinível
+    glmer(cumN ~ poly(day, 2) + (day|month) , 
+          offset = log(cumTotal), # offset
+          family = poisson(link = "log"), # família poisson com o link = log
+          data = .)
+  
+  # função para cálculo do valor predito
+  
+  pred <- function(x){
+    
+    (predict(fit, 
+             newdata = data.frame(day = x, month = 2), 
+             type = "response") * 100) %>% round(1)
+    
+  }
+  
+# base de dados com os erros de predição para a base de teste
+
+erro <- data_test() %>%
+  mutate(cumN = cumsum(n),
+         cumTotal = cumsum(total)) %>% 
+  select(day, cumN, cumTotal) %>% 
+  mutate(obs = (cumN/cumTotal * 100) %>% round(1),
+         pred = pred(day),
+         erro = (abs(pred - obs)/obs * 100) %>% round(1)) %>% 
+  select(day, obs, pred, erro)
+  
+})
+
+```
+
+### Acurácia (%) {.value-box}
+
+```{r}
+
+renderValueBox({
+  
+  mape <- erro() %>% summarise(MAPE = mean(erro)) %>% pull
+  
+  valueBox(
+    value = round(mape, 2),
+    icon = "fa-area-chart",
+    color = if (mape >= 30) "warning" else "primary"
+  )
+  
+})
+
+```
+
+### Erros
+
+```{r}
+
+renderDT({
+  
+  erro() %>% 
+    datatable(rownames = FALSE, options = list(dom = "t"),
+              colnames = c("Dia", "Observado", "Predito", "Erro %"))
+})
+
+```
+
+Column
+-----------------------------------------------------------------------
+
+### Ajuste do modelo (passe o mouser no ponto vermelho a fim de ver o valor projetado)
+
+```{r}
+
+# ajuste do modelo
+
+renderPlotly({
+  
+  fit <- 
+    data_train1() %>% 
+    bind_rows(data_train2()) %>%
+    group_by(month) %>% 
+    mutate(cumN = cumsum(n),
+           cumTotal = cumsum(total)) %>%
+    
+    # modelo multinível
+    glmer(cumN ~ poly(day, 2) + (day|month) , 
+          offset = log(cumTotal), # offset
+          family = poisson(link = "log"), # família poisson com o link = log
+          data = .)
+  
+  # dados para construir as curvas
+  
+  predito <-
+    tibble(pred = predict(fit, newdata = data.frame(day = 1:31, month = 1), type = "response")) %>% 
+    bind_rows(tibble(pred = predict(fit, newdata = data.frame(day = 1:31, month = 2), type = "response"))) %>% 
+    bind_cols(month = rep(1:2, c(31, 31))) %>% 
+    bind_cols(day = rep(1:31, 2)) %>% 
+    mutate(month = factor(month, labels = c("Janeiro", "Fevereiro")))
+  
+  # gráfico com os ajustes
+  
+  g4 <- dataInput() %>%
+    mutate(month = factor(month, labels = c("Janeiro", "Fevereiro"))) %>% 
+    group_by(month) %>% 
+    mutate(cumN = cumsum(n),
+           cumTotal = cumsum(total)) %>%
+    ggplot() +
+    aes(day, cumN/cumTotal * 100) +
+    geom_line() +
+    facet_grid(~ month) +
+    theme_minimal() +
+    theme(plot.margin = margin(l = 1, t = 1, unit = "cm")) +
+    # inserindo as curvas
+    geom_line(data = predito %>% filter(month == "Janeiro"), aes(day, pred * 100, colour = "Projeções")) +
+    geom_line(data = predito %>% filter(month == "Fevereiro"), aes(day, pred * 100, colour = "Projeções")) +
+    # inserindo o ponto
+    geom_point(data = predito %>% filter(month == "Fevereiro", day == 28), 
+               aes(day, pred * 100, 
+                   colour = "Dia 28",
+                   text = glue("Dia: {day} <br> %: {round(pred * 100, 1)}")), 
+               size = 2, alpha = .7) +
+    labs(x = "Dias", y = "%", colour = "")
+  ggplotly(g4, tooltip = "text")
+  
+})
+
+```
+
+
+

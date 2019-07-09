@@ -1,0 +1,447 @@
+---
+title: "Relatório"
+author: "Thiago Pires"
+date: "05/07/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+# configuração do knitr
+
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+```
+
+Os pacotes utilizados são declarados abaixo:
+
+```{r}
+
+# pacotes utilizados
+
+require(dplyr)
+require(magrittr)
+require(readr)
+require(DBI)
+require(dbplyr)
+require(lubridate)
+require(ggplot2)
+require(DT)
+require(plotly)
+require(glue)
+require(leaflet)
+
+```
+
+# Estruturação da base
+
+## Leitura do csv
+
+A seguir o comando para leitura da base de dados fornecida em `.csv`.
+
+```{r eval=FALSE}
+
+banco <- 
+  read_csv2("dataset/ticket_cientista.csv") # leitura do csv na pasta dataset
+
+```
+
+## Construindo uma conexão SQL
+
+Na rotina abaixo apresenta-se a criação da conexão com uma base de dados em SQL, no caso foi utilizado um SQLite. Contudo, o mesmo procedimento constroi uma conexão com outros bancos SQL, mudando apenas o argumento do drive (`RSQLite::SQLite()`). Este procedimento poderá ser útil caso tenha uma base em um servidor (local/cloud).
+
+```{r}
+
+# criando canal com DB
+
+canal <- dbConnect(RSQLite::SQLite(), dbname = "DB.sqlite")
+
+```
+
+```{r eval=FALSE}
+
+banco %>% 
+  select(customerCode, onTimeSolution, callStatus, callCloseDate, averageSolutionTime, siteState) %>% 
+  dbWriteTable(canal, "dataset", value = ., overwrite = TRUE) # salvando no DB
+
+```
+
+## Manipulação e construção de variáveis
+
+A rotina abaixo faz a manipualção inicial dos dados. O comando `tbl(canal, "dataset")` faz a conexão com a base de dados. O objetivo foi construir um conjunto de dados com as principais informação para a modelagem. A tabela vai ter as informações do número de atendimentos diários com a coluna `total`, o número de atendimentos que foram realizados dentro do constratado `n`, o id dos clientes `customerCode`, qual o mês que foi encerrado o chamado e qual o tempo para solução `averageSolutionTime`.
+
+Foi construída um conjunto `dataset_a` somente com os **chamados fechados** em cada mês.
+
+Foi construída uma base `solutiontime` com os tempos para a solução.
+
+```{r eval=FALSE}
+
+tbl(canal, "dataset") %>% 
+  as_tibble() %>% 
+  mutate( 
+    
+    # construindo e transformando variáveis
+    
+    onTimeSolution = case_when(
+      onTimeSolution == "S" ~ 1, # fechado dentro do tempo
+      onTimeSolution == "N" ~ 0), # não fechado dentro do tempo
+    callStatus = case_when(
+      callStatus %in% c("N0", "N4", "CV") ~ 1, # fechado
+      TRUE ~ 0), # não fechado
+    day = day(ymd(callCloseDate)), # construindo variável dia
+    month = month(ymd(callCloseDate)) # construindo variável mês
+  ) %>% 
+  dbWriteTable(canal, "dataset", value = ., overwrite = TRUE)
+
+# agregagando o banco
+
+tbl(canal, "dataset") %>% 
+  # filtrando somente com status fechado e com onTimeSolution válido
+  filter(callStatus == 1, !is.na(onTimeSolution)) %>% 
+  # total de chamados por fechado no tempo, cliente, mês, dia
+  group_by(customerCode, onTimeSolution, month, day) %>% 
+  summarise(n = n()) %>%
+  as_tibble() %>% 
+  # total de chamados por cliente, mês, dia
+  group_by(customerCode, month, day) %>% 
+  mutate(total = sum(n)) %>% 
+  filter(onTimeSolution == 1) %>% 
+  dbWriteTable(canal, "dataset_a", value = ., overwrite = TRUE)
+
+# agregando o banco com os tempos de resolução
+
+tbl(canal, "dataset") %>% 
+  filter(callStatus == 1,
+         !is.na(onTimeSolution)) %>% 
+  as_tibble() %>%
+  mutate(month = factor(month, labels = c("Janeiro", "Fevereiro")),
+         onTimeSolution = factor(onTimeSolution, labels = c("Não", "Sim"))) %>% select(customerCode, day, month, averageSolutionTime, onTimeSolution) %>%
+  group_by(customerCode, month, day, onTimeSolution) %>% 
+  # cálculo da média diária para cada mês e segundo onTimeSolution
+  summarise(mean = mean(averageSolutionTime, na.rm = TRUE)) %>%
+  dbWriteTable(canal, "solutiontime", value = ., overwrite = TRUE)
+
+# Construindo os dados com as análises por estado
+
+State <- # conjunto de dados com o quantitativo onTimeSolution por UF
+  tbl(canal, "dataset") %>% 
+  filter(callStatus == 1,
+         !is.na(onTimeSolution)) %>% 
+  as_tibble() %>% 
+  mutate(month = factor(month, labels = c("Janeiro", "Fevereiro"))) %>% 
+  group_by(customerCode, month, siteState, onTimeSolution) %>% 
+  summarise(n = n()) %>% 
+  group_by(customerCode, month, siteState) %>% 
+  mutate(total = sum(n)) %>% 
+  filter(onTimeSolution == 1)
+
+uf <- # informações sobre os centroids de cada estado
+  read_csv2("https://raw.githubusercontent.com/th1460/Analysis/master/aws/gtrendsR/dados.csv") # dados lido do github
+
+uf %<>% # informações com a chave para ligar os centroids com o conjunto de dados
+  left_join(
+    tibble(
+      SIGLA = c("RS", "SC", "PR", "SP", "MG", "RJ", "ES", "BA", "SE",
+                "PE", "PB", "RN", "AL", "CE", "PI", "MA", "PA", "AM",
+                "AP", "RO", "RR", "AC", "MT", "MS", "DF", "GO", "TO"),
+      CD_GEOCUF = c(43, 42, 41, 35, 31, 33, 32, 29, 28,
+                    26, 25, 24, 27, 23, 22, 21, 15, 13,
+                    16, 11, 14, 12, 51, 50, 53, 52, 17)),
+    by = "CD_GEOCUF"  
+  ) 
+
+State %>% 
+  left_join(uf %>% select(SIGLA, LON, LAT), 
+            by = c("siteState" = "SIGLA")) %>% 
+  dbWriteTable(canal, "state", value = ., overwrite = TRUE)
+
+```
+
+# Resultados
+
+## Algumas análises descritivas
+
+As análises a seguir foram feitas para o cliente `215`, no final será apresentada uma aplicação web feita em `shiny` onde poderão ser acessados os resultados de todos os clientes.
+
+No resultado abaixo temos a distribuição diária do percentual dos chamados efetivamente concluídos.
+
+```{r fig.align='center', fig.cap="Distribuição diária do percentual de chamados efetivamente concluídos no tempo acordado, segundo mês de fechamento", fig.width=10}
+
+g1 <- tbl(canal, "dataset_a") %>% 
+  filter(customerCode == 215) %>% 
+  as_tibble() %>% 
+  mutate(month = factor(month, labels = c("Janeiro", "Fevereiro"))) %>% 
+  ggplot() +
+  aes(day, n/total * 100) + 
+  geom_line() + 
+  geom_point(aes(text = glue("Dia: {day} <br> %: {(n/total * 100) %>% round(1)}"))) +
+  scale_x_discrete(limits = seq(1, 31, 2)) +
+  facet_grid( ~ month) +
+  labs(x = "Dias") +
+  theme_minimal()
+ggplotly(g1, tooltip = "text")
+
+```
+
+O percentual acumulado de chamados que foram fechados no tempo acordado segundo os meses de Janeiro e Fevereiro, são apresentados abaixo.
+
+```{r fig.align='center', fig.cap="Percentual de chamados efetivamente concluídos no tempo acordado, segundo os meses"}
+
+g2 <- tbl(canal, "dataset_a") %>% 
+  filter(customerCode == 215) %>% 
+  as_tibble() %>% 
+  mutate(month = factor(month, labels = c("Janeiro", "Fevereiro"))) %>% 
+  group_by(month) %>% 
+  summarise(n = sum(n, rm.na = TRUE), 
+            total = sum(total, rm.na = TRUE)) %>% 
+  mutate(taxa = n/total * 100) %>% 
+  ggplot() +
+  aes(as.factor(month), taxa) +
+  geom_col(alpha = .8, aes(text = glue("Mês: {as.factor(month)} <br> %: {taxa %>% round(2)}"))) +
+  labs(x = "Mês", y = "%") +
+  theme_minimal()
+ggplotly(g2, tooltip = "text")
+
+```
+
+Foi feita uma análise adicional que apresenta algumas medidas sumários sobre o tempo de solução do problema. Os problemas que não tiveram solução no tempo acordado levam mais de 4 vezes o tempo que tiveram a solução no tempo acordado. A mediana com um valor bem menor do que a média mostra que a distribuição é bastante assimétrica e que existe alguns valores de tempo muito alto (possíveis outliers) que estão puxando esta média para cima.
+
+```{r fig.align='center', fig.cap="Medidas sumário da variável averageSolutionTime"}
+
+tbl(canal, "dataset") %>% 
+  filter(customerCode == 215) %>% 
+  as_tibble() %>% 
+  mutate(month = factor(month, labels = c("Janeiro", "Fevereiro"))) %>% 
+  group_by(month, onTimeSolution) %>% 
+  summarise(`Média` = mean(averageSolutionTime, na.rm = TRUE) %>% round(1), 
+            `Desvio-padrão` = sd(averageSolutionTime, na.rm = TRUE) %>% round(1),
+            `Mediana` = median(averageSolutionTime, na.rm = TRUE),
+            `Intervalo interquartílico` = IQR(averageSolutionTime, na.rm = TRUE)) %>% 
+  na.omit() %>% 
+  rename(`Mês` = month) %>% 
+  mutate(onTimeSolution = onTimeSolution %>% factor(labels = c("Não", "Sim"))) %>% 
+  datatable(rownames = FALSE, options = list(dom = "t"))
+
+```
+
+Abaixo temos a distribuição temporal dos tempos médio diários. Chamados que não tiveram a resolução a tempo apresentou valores muito mais altos, isso na ordem de 4 vezes.
+
+```{r fig.align='center', fig.cap="Tempo médio diário de solução do problema, segundo se fechou no tempo contratado", fig.width=10}
+
+g3 <- 
+  tbl(canal, "solutiontime") %>% 
+  filter(customerCode == 215) %>% 
+  as_tibble() %>% 
+  mutate(month = factor(month, levels = c("Janeiro", "Fevereiro"))) %>% 
+  ggplot() +
+  aes(day, mean, 
+      group = onTimeSolution,
+      colour = onTimeSolution,
+      text = glue("Dia: {day} <br> Média: {mean %>% round(1)}")) + 
+  geom_line(alpha = .8) +
+  scale_x_discrete(limits = seq(1, 31, 2)) +
+  facet_grid(~ month) +
+  labs(x = "Dias", y = "Média diária de tempo de solução", colour = "") +
+  theme_minimal()
+
+gp3 <- ggplotly(g3, tooltip = "text")
+gp3[['x']][['layout']][['annotations']][[2]][['x']] <- -0.08
+gp3 %>% 
+  layout(margin = list(l = 90))
+```
+
+
+Abaixo temos a análise dos estados para os meses de Janeiro e Fevereiro. Em janeiro, o pior estado foi o Acre com somente 25% dos atendimentos serem realizados no tempo contratado. Os outros estados com menos de 50% foram Rondônia e Mato Grosso.
+
+```{r fig.align='center', fig.cap="Distribuição espacial do percentual de atendimentos fechados no prazo, mês de Janeiro"}
+
+State1 <- 
+  tbl(canal, "state") %>% # filtrando para o mês de janeiro
+  as_tibble() %>% 
+  filter(month == "Janeiro", customerCode == 215) %>% 
+  mutate(taxa = (n/total * 100) %>% round(1))
+
+npal <- # palheta com as cores que serão plotadas
+  colorNumeric("RdYlBu", 
+               State1 %>% 
+                 pull(taxa), 
+               reverse = FALSE)
+
+leaflet(data = State1) %>% # construção do mapa
+  addTiles() %>% 
+  addCircleMarkers(lng = ~LON, lat = ~LAT, 
+                   color = ~npal(taxa), 
+                   label = ~glue("{siteState} ({taxa})")) %>% 
+  addLegend(pal = npal,
+            values = ~taxa,
+            opacity = .8,
+            title = "Janeiro")
+
+```
+
+No mês de Fevereiro as ufs com os piores resultados foram Acre e Rondônia que obtiveram menos de 50% de atendimentos fechados no prazo.
+
+```{r fig.align='center', fig.cap="Distribuição espacial do percentual de atendimentos fechados no prazo, mês de Fevereiro"}
+
+State2 <- 
+  tbl(canal, "state") %>% # filtrando para o mês de fevereiro
+  as_tibble() %>%
+  filter(month == "Fevereiro", customerCode == 215) %>% 
+  mutate(taxa = (n/total * 100) %>% round(1))
+
+npal <- # palheta com as cores que serão plotadas
+  colorNumeric("RdYlBu", 
+               State2 %>% 
+                 pull(taxa), 
+               reverse = FALSE)
+
+leaflet(data = State2) %>% # construção do mapa
+  addTiles() %>% 
+  addCircleMarkers(lng = ~LON, lat = ~LAT, 
+                   color = ~npal(taxa), 
+                   label = ~glue("{siteState} ({taxa})")) %>% 
+  addLegend(pal = npal,
+            values = ~taxa,
+            opacity = .8,
+            title = "Fevereiro")
+
+```
+
+## Modelagem
+
+O modelo escolhido para a análise foi o modelo multinível como discriminado abaixo. O $n$ é o número de chamados fechados no tempo contratado, $t$ é o número de chamados fechados no mês e $x$ é o dia. Tanto $n$, quanto $t$ foram considerados valores acumulados. Os índices $i$ e $j$ se referem ao dia e mês respectivamente. O modelo multinível foi escolhido por lidar bem com a dependência temporal que existe. Assim os dias estão aninhados nos meses
+
+$$\text{log}\left(\frac{n_{ij}}{t_{ij}}\right) = \alpha_j + \beta_j x_{ij} + \varepsilon_{ij}$$
+Após a transformação do modelo, ele poderá ser considerado como sendo da família poisson, a função log como link e tendo um *offset*. Este *offset* entra como um elemento que não será estimado, mas serve para ajustar o modelo de forma adequada (serve como uma padronização).
+
+$$\text{log}(n_{ij}) - \text{log}(t_{ij}) = \alpha_j + \beta_j x + \varepsilon_{ij}$$
+$$\text{log}(n_{ij}) = \alpha_j + \beta_j x_j + offset(\text{log}(t_{ij}))  + \varepsilon_{ij}$$
+
+Para uma melhor especificação do modelo foi inserido um termo quadrático ficando no final:
+
+$$\text{log}(n_{ij}) = \alpha_j + \beta_{1ij} x_{ij} + \beta_{2ij} x_{ij}^2 + offset(\text{log}(t_{ij}))  + \varepsilon_{ij}$$
+
+Para avaliação da acurácia do modelo foi proposto fazer um treino com os meses de Janeiro e 80% dos dados de Fevereiro e testar com os últimos 20% do mês de Fevereiro. Para cálculo do erro foi utilizado o *Mean absolute percentage error* (MAPE), descrito na equação abaixo:
+
+$$\text{MAPE} = \sum_{i = k}^{l}\left|\frac{\text{pred}_i - \text{obs}_i}{\text{obs}_i}\right|\times 100\%$$
+
+```{r fig.align='center', fig.cap="Cálculo do erro de projeção para os últimos 20%"}
+
+require(lme4)
+
+# separação dos dados de treino e de teste
+
+data_train1 <- # dados de treino do mês de janeiro
+  tbl(canal, "dataset_a") %>% 
+  filter(customerCode == 215) %>% 
+  as_tibble() %>% 
+  filter(month == 1)
+
+data2 <- # dados do mês de fevereiro
+  tbl(canal, "dataset_a") %>% 
+  filter(customerCode == 215) %>% 
+  as_tibble() %>% 
+  filter(month == 2)
+
+data_train2 <- # seleção dos 80% do mês de fevereiro para treino
+  data2 %>% 
+  slice(1:round(data2 %>% count() %>% pull() * .8, 0))
+
+data_test <- # dados de teste (20%)
+  data2 %>% anti_join(data_train2, by = "day")
+
+
+# ajuste do modelo
+
+fit <- 
+  data_train1 %>% 
+  bind_rows(data_train2) %>%
+  group_by(month) %>% 
+  mutate(cumN = cumsum(n),
+         cumTotal = cumsum(total)) %>%
+  
+  # modelo multinível
+  glmer(cumN ~ poly(day, 2) + (day|month) , 
+        offset = log(cumTotal), # offset
+        family = poisson(link = "log"), # família poisson com o link = log
+        data = .)
+
+# função para cálculo do valor predito
+
+pred <- function(x){ 
+  
+  (predict(fit, 
+           newdata = data.frame(day = x, month = 2), 
+           type = "response") * 100) %>% round(1)
+  
+}
+
+# base de dados com os erros de predição para a base de teste
+
+erro <- data_test %>%
+  mutate(cumN = cumsum(n),
+         cumTotal = cumsum(total)) %>% 
+  select(day, cumN, cumTotal) %>% 
+  mutate(obs = (cumN/cumTotal * 100) %>% round(1),
+         pred = pred(day),
+         erro = (abs(pred - obs)/obs * 100) %>% round(1)) %>% 
+  select(day, obs, pred, erro)
+
+erro %>% datatable(rownames = FALSE, options = list(dom = "t"),
+                   colnames = c("Dia", "Observado", "Predito", "Erro %"))
+
+```
+
+
+O MAPE calculado foi de `r erro %>% pull(erro) %>% mean()`%.
+
+Abaixo temos que a projeção do dia 28 será 77,7%.
+
+```{r fig.align='center', fig.cap="Projeção do percentual de atendimento fechado no tempo", fig.width=9}
+
+# dados para construir as curvas
+
+predito <-
+  tibble(pred = predict(fit, newdata = data.frame(day = 1:31, month = 1), type = "response")) %>% 
+  bind_rows(tibble(pred = predict(fit, newdata = data.frame(day = 1:31, month = 2), type = "response"))) %>% 
+  bind_cols(month = rep(1:2, c(31, 31))) %>% 
+  bind_cols(day = rep(1:31, 2)) %>% 
+  mutate(month = factor(month, labels = c("Janeiro", "Fevereiro")))
+
+# gráfico com os ajustes
+
+g4 <- tbl(canal, "dataset_a") %>% 
+  filter(customerCode == 215) %>% 
+  as_tibble() %>%
+  mutate(month = factor(month, labels = c("Janeiro", "Fevereiro"))) %>% 
+  group_by(month) %>% 
+  mutate(cumN = cumsum(n),
+         cumTotal = cumsum(total)) %>%
+  ggplot() +
+  aes(day, cumN/cumTotal * 100) +
+  geom_line() +
+  facet_grid(~ month) +
+  theme_minimal() +
+  # inserindo as curvas
+  geom_line(data = predito %>% filter(month == "Janeiro"), aes(day, pred * 100, colour = "Projeções")) +
+  geom_line(data = predito %>% filter(month == "Fevereiro"), aes(day, pred * 100, colour = "Projeções")) +
+  # inserindo o ponto
+  geom_point(data = predito %>% filter(month == "Fevereiro", day == 28), 
+             aes(day, pred * 100, 
+                 colour = "Dia 28",
+                 text = glue("Dia: {day} <br> %: {round(pred * 100, 1)}")), 
+             size = 2, alpha = .7) +
+  labs(x = "Dias", colour = "")
+ggplotly(g4, tooltip = "text")
+
+```
+
+Algumas limitações de ajuste do modelo foram que apesar de se ter muito dado no nível individual, necessitaria de mais dados no nível agregado como se deseja a projeção. Os dados apresentam informações de apenas 2 meses, então uma cobertura maior seria importante.
+
+## Aplicação Web em Shiny
+
+Foi desenvolvida uma aplicação *Web*  no pacote `shiny` a fim de analisar todos os clientes como foi realizado para um aqui. Esta aplicação vai rodar no Shiny Server em um servidor Linux na nuvem (utilizando serviços da Google Cloud Platform).
+
+## API
+
+Foi utilizado o pacote `plumber` a fim conceder acesso aos dados projetados através de uma API. A API também vai rodar no mesmo servidor da aplicação *Web*.
