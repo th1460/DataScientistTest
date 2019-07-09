@@ -440,7 +440,7 @@ Algumas limitações de ajuste do modelo foram que apesar de se ter muito dado n
 
 ## Aplicação Web em Shiny
 
-Foi desenvolvida uma aplicação *Web*  no pacote `shiny` a fim de analisar todos os clientes como foi realizado para um aqui. Esta aplicação vai rodar no Shiny Server em um servidor Linux na nuvem (utilizando serviços da Google Cloud Platform).
+Foi desenvolvida uma aplicação *Web*  no pacote `shiny` a fim de analisar todos os clientes como foi realizado para um aqui. Esta aplicação vai rodar no Shiny Server em um servidor Linux na nuvem (utilizando serviços da Google Cloud Platform). O código desenvolvido da aplicação está no arquivo `dashboard.Rmd`.
 
 ## API
 
