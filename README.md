@@ -4,7 +4,9 @@ Neste repositório contém a resolução do teste aplicado pela IBM a fim de ver
 
 ## Conteúdo do repositório
 
-  * `DB.sqlite`: base de dados em sqlite contendo os dados de amálise
+Segue uma descrição dos principais arquivos e pastas do repositório
+
+  * `DB.sqlite`: base de dados em sqlite contendo os dados de análise
   * `report.Rmd`: arquivo contendo uma descrição detalhada de todo o processo de solução do problema e ferramentas adicionais que foram desenvolvidas. Contém informações técnicas e de metodologia. Os códigos também estão documentados aqui.
   * `report.html`: o conteúdo deste arquivo é o mesmo do que o anterior (`report.Rmd`), contudo está renderizado, assim aqui é possivel visualizar os gráficos, tabelas e resultados em geral de forma mais clara. As análises aqui apresentadas são de somente 1 cliente, contudo as mesmas análises para os demais clientes poderão ser vistas na aplicação Web.
   * `dashboard.Rmd`: este arquivo contém o código para criação da aplicação web. Ela foi desenvolvido no pacote `shiny` do R. A aplicação poderá ser acessada em: <http://35.229.22.117:3838/DataScientistTest/>
