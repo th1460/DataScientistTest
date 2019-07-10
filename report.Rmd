@@ -395,7 +395,7 @@ erro %>% datatable(rownames = FALSE, options = list(dom = "t"),
 
 O MAPE calculado foi de `r erro %>% pull(erro) %>% mean()`%.
 
-Abaixo temos que a projeção do dia 28 será 77,7%.
+Abaixo temos que ao utilizar o modelo, a projeção do dia 28 será de 77,7%.
 
 ```{r fig.align='center', fig.cap="Projeção do percentual de atendimento fechado no tempo", fig.width=9}
 
@@ -442,14 +442,27 @@ Algumas limitações de ajuste do modelo foram que apesar de se ter muito dado n
 
 Foi desenvolvida uma aplicação *Web*  no pacote `shiny` a fim de analisar todos os clientes como foi realizado para um aqui. Esta aplicação vai rodar no Shiny Server em um servidor Linux na nuvem (utilizando serviços da Google Cloud Platform). O código desenvolvido da aplicação está no arquivo `dashboard.Rmd`.
 
-A aplicação está rondando no link: <http://35.229.22.117:3838/DataScientistTest/>
+A aplicação está rondando no endereço do link: <http://35.229.22.117:3838/DataScientistTest/>
 
 ## API
 
 Foi utilizado o pacote `plumber` a fim conceder acesso a projeção do dia 28 de Fevereiro através de uma API. A API também vai rodar no mesmo servidor da aplicação *Web*.
 
-A API poderá ser consumida pelo link: <http://35.229.22.117:7852/predict?cliente=215> (no exemplo estou utilizando o cliente 215)
+A API poderá ser consumida neste endereço do link: <http://35.229.22.117:7852/predict?cliente=215> (no exemplo estou utilizando o cliente 215)
 
-A inicialização da API no terminal se da pela execução do código:
+A inicialização da API no terminal no servidor se da pela execução do código, onde se indica qual o host e qual a porta de acesso
 
-`R -e 'plumber::plumb("plumber.R")$run(host = "0.0.0.0", port = 7852)'`
+```
+R -e 'plumber::plumb("plumber.R")$run(host = "0.0.0.0", port = 7852)'
+```
+
+Um exemplo de como a API poderá ser utilizada e extraída a informação usando o próprio R utilizando o pacote `httr`:
+
+```{r}
+
+httr::GET("http://35.229.22.117:7852/predict?cliente=215") %>%
+  httr::content() %>% 
+  unlist()
+
+```
+
