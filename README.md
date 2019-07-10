@@ -1,30 +1,11 @@
-# Objetivo:
-O objetivo deste desafio é permitir uma melhor avaliação das suas habilidades como candidato a vaga de Data Scientist. Este desafio deve ser feito individualmente.
+# DataScienceTest
 
-# Instruções:
-Primeiro, faça um fork deste projeto para sua conta no Github (crie uma se você não possuir). Em seguida, implemente o projeto tal qual descrito abaixo, em seu próprio fork. Por fim, faça Push de todas as suas alterações para o seu fork no Github e envie um pull request para este repositório original.
+Neste repositório contém a resolução do teste aplicado pela IBM a fim de verificar as habilidades técnicas para o cargo. O teste foi realizado em linguagem R.
 
-# Enunciado do Teste
+## Conteúdo do repositório
 
-SLA (Service Level Agreement) é uma métrica que indica se um chamado fechado foi atendido dentro do tempo contratado ou não.
-
-A base de dados fornecida representa um conjunto de chamados unitários, abertos e fechados para 10 clientes diferentes (coluna customerCode).
-
-O SLA no instante t é calculado pelo numero de chamados fechados dentro do mês até o instante t (coluna “onTimeSolution=S”) dividido pelo total de chamados do mês até o instante t.
-
-O desafio proposto é gerar um modelo preditivo que possa informar a percentagem de SLA no mês para cada cliente.  
-Os dados fornecidos são de 01 de Janeiro de 2019 até 26 de Fevereiro de 2019. O modelo deve então prever qual será o SLA do dia 28 de Fevereiro (final do mês).
-
-  ## Considerações:
-  * Para identificar qual  ticket ja foi fechado , usa-se a coluna “callStatus”, onde os status fechados são: N0, N4 e CV.
-  * Para identificar quais tickets foram fechados dentro ou fora do SLA , usa-se a coluna “onTimeSolution”(S = foi fechado dentro e N = não foi fechado dentro)
-
-  ## Serão avaliados:
-  * Algoritmo utilizado
-  * Acuracidade do modelo: métricas utilizadas
-  * Organização do código( será avaliado no GIT)
-  * Visualizações geradas
-
-  ## Extras (não obrigatório):
-  * Outros insights baseados nos dados fornecidos.
-  * Exposição do modelo através de API (kubernetes ou IBM Cloud)
+  * `DB.sqlite`: base de dados em sqlite contendo os dados de amálise
+  * `report.Rmd`: arquivo contendo uma descrição detalhada de todo o processo de solução do problema e ferramentas adicionais que foram desenvolvidas. Contém informações técnicas e de metodologia. Os códigos também estão documentados aqui.
+  * `report.html`: o conteúdo deste arquivo é o mesmo do que o anterior (`report.Rmd`), contudo está renderizado, assim aqui é possivel visualizar os gráficos, tabelas e resultados em geral de forma mais clara. As análises aqui apresentadas são de somente 1 cliente, contudo as mesmas análises para os demais clientes poderão ser vistas na aplicação Web.
+  * `dashboard.Rmd`: este arquivo contém o código para criação da aplicação web. Ela foi desenvolvido no pacote `shiny` do R. A aplicação poderá ser acessada em: <http://35.229.22.117:3838/DataScientistTest/>
+  * `api/prediction`: neste diretório contém o código para gerar a API. A API fornece a projeção para o dia 28 de fevereiro. A API poderá ser consumida em <http://35.229.22.117:7852/predict?cliente=215> (exemplo utilizando o cliente 215).
